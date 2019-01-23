@@ -18,8 +18,12 @@
     <parent>
         <groupId>com.alibaba.nacos</groupId>
         <artifactId>nacos-all</artifactId>
+<<<<<<< HEAD
         <version>0.8.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
+=======
+        <version>0.8.0</version>
+>>>>>>> db9489b9c285c00ffac167a0c726965e30d06f9e
     </parent>
     <artifactId>nacos-console</artifactId>
     <!--<packaging>war</packaging>-->
