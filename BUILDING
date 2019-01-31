@@ -36,3 +36,5 @@ Build Instructions for NACOS
 
 	#build nacos
     $ mvn -Prelease-nacos -DskipTests clean install -U
+        P meaning Profiles
+        D meaning Properties
