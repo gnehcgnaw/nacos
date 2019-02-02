@@ -4,9 +4,27 @@ server.contextPath=/nacos
 server.servlet.contextPath=/nacos
 server.port=8848
 
+nacos.cmdb.dumpTaskInterval=3600
+nacos.cmdb.eventTaskInterval=10
+nacos.cmdb.loadDataAtStart=false
 
-db.num=2
-db.url.0=jdbc:mysql://11.162.196.16:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
-db.url.1=jdbc:mysql://11.163.152.9:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
-db.user=nacos_devtest
-db.password=nacos
+#数据库类型
+#spring.datasource.platform=mysql
+
+spring.datasource.platform=mysql
+
+#数据库数量
+#db.num=2
+db.num=1
+#数据库连接地址
+#db.url.0=jdbc:mysql://11.162.196.16:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
+#db.url.1=jdbc:mysql://11.163.152.9:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
+
+db.url.0=jdbc:mysql://192.168.1.202:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
+#数据库用户名，密码
+
+#db.user=nacos_devtest
+#db.password=youdontknow
+
+db.user=root
+db.password=123456
