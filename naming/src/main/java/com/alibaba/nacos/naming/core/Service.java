@@ -16,18 +16,18 @@
 package com.alibaba.nacos.naming.core;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.TypeReference;
 import com.alibaba.fastjson.annotation.JSONField;
+import com.alibaba.nacos.naming.boot.SpringContext;
+import com.alibaba.nacos.naming.consistency.RecordListener;
+import com.alibaba.nacos.naming.consistency.KeyBuilder;
 import com.alibaba.nacos.naming.healthcheck.ClientBeatCheckTask;
 import com.alibaba.nacos.naming.healthcheck.ClientBeatProcessor;
 import com.alibaba.nacos.naming.healthcheck.HealthCheckReactor;
 import com.alibaba.nacos.naming.healthcheck.RsInfo;
 import com.alibaba.nacos.naming.misc.Loggers;
-import com.alibaba.nacos.naming.misc.NetUtils;
 import com.alibaba.nacos.naming.misc.UtilsAndCommons;
+import com.alibaba.nacos.naming.pojo.Record;
 import com.alibaba.nacos.naming.push.PushService;
-import com.alibaba.nacos.naming.raft.RaftCore;
-import com.alibaba.nacos.naming.raft.RaftListener;
 import com.alibaba.nacos.naming.selector.NoneSelector;
 import com.alibaba.nacos.naming.selector.Selector;
 import org.apache.commons.collections.CollectionUtils;
@@ -39,16 +39,20 @@ import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * @author <a href="mailto:zpf.073@gmail.com">nkorange</a>
+ * Service of Nacos server side
+ * <p>
+ * We introduce a 'service --> cluster --> instance' model, in which service stores a list of clusters,
+ * which contains a list of instances.
+ * <p>
+ * This class inherits from Service in API module and stores some fields that do not expose to client.
+ *
+ * @author nkorange
  */
-public class VirtualClusterDomain implements Domain, RaftListener {
+public class Service extends com.alibaba.nacos.api.naming.pojo.Service implements Record, RecordListener<Instances> {
 
-    private static final String DOMAIN_NAME_SYNTAX = "[0-9a-zA-Z\\.:_-]+";
-
-    public static final int MINIMUM_IP_DELETE_TIMEOUT = 60 * 1000;
+    private static final String SERVICE_NAME_SYNTAX = "[0-9a-zA-Z@\\.:_-]+";
 
     @JSONField(serialize = false)
     private ClientBeatProcessor clientBeatProcessor = new ClientBeatProcessor();
@@ -56,13 +60,10 @@ public class VirtualClusterDomain implements Domain, RaftListener {
     @JSONField(serialize = false)
     private ClientBeatCheckTask clientBeatCheckTask = new ClientBeatCheckTask(this);
 
-    private String name;
     private String token;
     private List<String> owners = new ArrayList<>();
     private Boolean resetWeight = false;
-    private Boolean enableHealthCheck = true;
     private Boolean enabled = true;
-    private Boolean enableClientBeat = false;
     private Selector selector = new NoneSelector();
     private String namespaceId;
 
@@ -73,15 +74,26 @@ public class VirtualClusterDomain implements Domain, RaftListener {
 
     private volatile long lastModifiedMillis = 0L;
 
-    private boolean useSpecifiedURL = false;
-
-    private float protectThreshold = 0.0F;
-
     private volatile String checksum;
+
+    /**
+     * TODO set customized push expire time:
+     */
+    private long pushCacheMillis = 0L;
 
     private Map<String, Cluster> clusterMap = new HashMap<String, Cluster>();
 
-    private Map<String, String> metadata = new ConcurrentHashMap<>();
+    public Service() {
+    }
+
+    public Service(String name) {
+        super(name);
+    }
+
+    @JSONField(serialize = false)
+    public PushService getPushService() {
+        return SpringContext.getAppContext().getBean(PushService.class);
+    }
 
     public long getIpDeleteTimeout() {
         return ipDeleteTimeout;
@@ -92,17 +104,9 @@ public class VirtualClusterDomain implements Domain, RaftListener {
     }
 
     public void processClientBeat(final RsInfo rsInfo) {
-        clientBeatProcessor.setDomain(this);
+        clientBeatProcessor.setService(this);
         clientBeatProcessor.setRsInfo(rsInfo);
         HealthCheckReactor.scheduleNow(clientBeatProcessor);
-    }
-
-    public Boolean getEnableClientBeat() {
-        return enableClientBeat;
-    }
-
-    public void setEnableClientBeat(Boolean enableClientBeat) {
-        this.enableClientBeat = enableClientBeat;
     }
 
     public Boolean getEnabled() {
@@ -111,14 +115,6 @@ public class VirtualClusterDomain implements Domain, RaftListener {
 
     public void setEnabled(Boolean enabled) {
         this.enabled = enabled;
-    }
-
-    public Boolean getEnableHealthCheck() {
-        return enableHealthCheck;
-    }
-
-    public void setEnableHealthCheck(Boolean enableHealthCheck) {
-        this.enableHealthCheck = enableHealthCheck;
     }
 
     public long getLastModifiedMillis() {
@@ -137,14 +133,6 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         this.resetWeight = resetWeight;
     }
 
-    public Map<String, String> getMetadata() {
-        return metadata;
-    }
-
-    public void setMetadata(Map<String, String> metadata) {
-        this.metadata = metadata;
-    }
-
     public Selector getSelector() {
         return selector;
     }
@@ -153,34 +141,22 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         this.selector = selector;
     }
 
-    public VirtualClusterDomain() {
-
-    }
-
     @Override
     public boolean interests(String key) {
-        return StringUtils.equals(key, UtilsAndCommons.IPADDRESS_DATA_ID_PRE + namespaceId + UtilsAndCommons.SERVICE_GROUP_CONNECTOR + name);
+        return KeyBuilder.matchInstanceListKey(key, namespaceId, getName());
     }
 
     @Override
     public boolean matchUnlistenKey(String key) {
-        return StringUtils.equals(key, UtilsAndCommons.IPADDRESS_DATA_ID_PRE + namespaceId + UtilsAndCommons.SERVICE_GROUP_CONNECTOR + name);
+        return KeyBuilder.matchInstanceListKey(key, namespaceId, getName());
     }
 
     @Override
-    public void onChange(String key, String value) throws Exception {
-
-        if (StringUtils.isEmpty(value)) {
-            Loggers.SRV_LOG.warn("[NACOS-DOM] received empty iplist config for dom: {}", name);
-            return;
-        }
+    public void onChange(String key, Instances value) throws Exception {
 
         Loggers.RAFT.info("[NACOS-RAFT] datum is changed, key: {}, value: {}", key, value);
 
-        List<IpAddress> ips = JSON.parseObject(value, new TypeReference<List<IpAddress>>() {
-        });
-
-        for (IpAddress ip : ips) {
+        for (Instance ip : value.getInstanceList()) {
 
             if (ip.getWeight() > 10000.0D) {
                 ip.setWeight(10000.0D);
@@ -191,102 +167,105 @@ public class VirtualClusterDomain implements Domain, RaftListener {
             }
         }
 
-        updateIPs(ips);
+        updateIPs(value.getInstanceList(), KeyBuilder.matchEphemeralInstanceListKey(key));
 
         recalculateChecksum();
     }
 
     @Override
-    public void onDelete(String key, String value) throws Exception {
+    public void onDelete(String key) throws Exception {
         // ignore
     }
 
-    public void updateIPs(List<IpAddress> ips) {
-        if (CollectionUtils.isEmpty(ips) && allIPs().size() > 1) {
-            return;
+    public int healthyInstanceCount() {
+
+        int healthyCount = 0;
+        for (Instance instance : allIPs()) {
+            if (instance.isHealthy()) {
+                healthyCount++;
+            }
         }
+        return healthyCount;
+    }
 
+    public boolean meetProtectThreshold() {
+        return (healthyInstanceCount() * 1.0 / allIPs().size()) <= getProtectThreshold();
+    }
 
-        Map<String, List<IpAddress>> ipMap = new HashMap<String, List<IpAddress>>(clusterMap.size());
+    public void updateIPs(Collection<Instance> instances, boolean ephemeral) {
+        Map<String, List<Instance>> ipMap = new HashMap<>(clusterMap.size());
         for (String clusterName : clusterMap.keySet()) {
-            ipMap.put(clusterName, new ArrayList<IpAddress>());
+            ipMap.put(clusterName, new ArrayList<>());
         }
 
-        for (IpAddress ip : ips) {
+        for (Instance instance : instances) {
             try {
-                if (ip == null) {
+                if (instance == null) {
                     Loggers.SRV_LOG.error("[NACOS-DOM] received malformed ip: null");
                     continue;
                 }
 
-                if (StringUtils.isEmpty(ip.getClusterName())) {
-                    ip.setClusterName(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
+                if (StringUtils.isEmpty(instance.getClusterName())) {
+                    instance.setClusterName(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
                 }
 
-                // put wild ip into DEFAULT cluster
-                if (!clusterMap.containsKey(ip.getClusterName())) {
-                    Loggers.SRV_LOG.warn("cluster of IP not found: {}", ip.toJSON());
-                    continue;
+                if (!clusterMap.containsKey(instance.getClusterName())) {
+                    Loggers.SRV_LOG.warn("cluster: {} not found, ip: {}, will create new cluster with default configuration.",
+                        instance.getClusterName(), instance.toJSON());
+                    Cluster cluster = new Cluster(instance.getClusterName());
+                    cluster.setService(this);
+                    getClusterMap().put(instance.getClusterName(), cluster);
                 }
 
-                List<IpAddress> clusterIPs = ipMap.get(ip.getClusterName());
+                List<Instance> clusterIPs = ipMap.get(instance.getClusterName());
                 if (clusterIPs == null) {
-                    clusterIPs = new LinkedList<IpAddress>();
-                    ipMap.put(ip.getClusterName(), clusterIPs);
+                    clusterIPs = new LinkedList<>();
+                    ipMap.put(instance.getClusterName(), clusterIPs);
                 }
 
-                clusterIPs.add(ip);
+                clusterIPs.add(instance);
             } catch (Exception e) {
-                Loggers.SRV_LOG.error("[NACOS-DOM] failed to process ip: " + ip, e);
+                Loggers.SRV_LOG.error("[NACOS-DOM] failed to process ip: " + instance, e);
             }
         }
 
-        for (Map.Entry<String, List<IpAddress>> entry : ipMap.entrySet()) {
+        for (Map.Entry<String, List<Instance>> entry : ipMap.entrySet()) {
             //make every ip mine
-            List<IpAddress> entryIPs = entry.getValue();
-            clusterMap.get(entry.getKey()).updateIPs(entryIPs);
+            List<Instance> entryIPs = entry.getValue();
+            clusterMap.get(entry.getKey()).updateIPs(entryIPs, ephemeral);
         }
+
         setLastModifiedMillis(System.currentTimeMillis());
-        PushService.domChanged(namespaceId, name);
+        getPushService().serviceChanged(namespaceId, getName());
         StringBuilder stringBuilder = new StringBuilder();
 
-        for (IpAddress ipAddress : allIPs()) {
-            stringBuilder.append(ipAddress.toIPAddr()).append("_").append(ipAddress.isValid()).append(",");
+        for (Instance instance : allIPs()) {
+            stringBuilder.append(instance.toIPAddr()).append("_").append(instance.isHealthy()).append(",");
         }
 
-        Loggers.EVT_LOG.info("[IP-UPDATED] dom: {}, ips: {}", getName(), stringBuilder.toString());
+        Loggers.EVT_LOG.info("[IP-UPDATED] service: {}, ips: {}", getName(), stringBuilder.toString());
 
     }
 
-    @Override
     public void init() {
 
-        RaftCore.listen(this);
         HealthCheckReactor.scheduleCheck(clientBeatCheckTask);
 
         for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+            entry.getValue().setService(this);
             entry.getValue().init();
         }
     }
 
-    @Override
     public void destroy() throws Exception {
         for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
             entry.getValue().destroy();
         }
-
-        if (RaftCore.isLeader(NetUtils.localServer())) {
-            RaftCore.signalDelete(UtilsAndCommons.getIPListStoreKey(this));
-        }
-
         HealthCheckReactor.cancelCheck(clientBeatCheckTask);
-
-        RaftCore.unlisten(UtilsAndCommons.getIPListStoreKey(this));
     }
 
-    @Override
-    public List<IpAddress> allIPs() {
-        List<IpAddress> allIPs = new ArrayList<IpAddress>();
+    public List<Instance> allIPs() {
+        List<Instance> allIPs = new ArrayList<>();
         for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
             allIPs.addAll(entry.getValue().allIPs());
         }
@@ -294,27 +273,21 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         return allIPs;
     }
 
-    public List<IpAddress> allIPs(String tenant, String app) {
-
-        List<IpAddress> allIPs = new ArrayList<IpAddress>();
+    public List<Instance> allIPs(boolean ephemeral) {
+        List<Instance> allIPs = new ArrayList<>();
         for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
-
-            if (StringUtils.isEmpty(app)) {
-                allIPs.addAll(entry.getValue().allIPs(tenant));
-            } else {
-                allIPs.addAll(entry.getValue().allIPs(tenant, app));
-            }
+            allIPs.addAll(entry.getValue().allIPs(ephemeral));
         }
 
         return allIPs;
     }
 
-    public List<IpAddress> allIPs(List<String> clusters) {
-        List<IpAddress> allIPs = new ArrayList<IpAddress>();
+    public List<Instance> allIPs(List<String> clusters) {
+        List<Instance> allIPs = new ArrayList<>();
         for (String cluster : clusters) {
             Cluster clusterObj = clusterMap.get(cluster);
             if (clusterObj == null) {
-                throw new IllegalArgumentException("can not find cluster: " + cluster + ", dom:" + getName());
+                throw new IllegalArgumentException("can not find cluster: " + cluster + ", service:" + getName());
             }
 
             allIPs.addAll(clusterObj.allIPs());
@@ -323,14 +296,7 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         return allIPs;
     }
 
-    @Override
-    public List<IpAddress> srvIPs(String clientIP) {
-        return srvIPs(clientIP, Collections.EMPTY_LIST);
-    }
-
-    public List<IpAddress> srvIPs(String clientIP, List<String> clusters) {
-        List<IpAddress> ips;
-
+    public List<Instance> srvIPs(List<String> clusters) {
         if (CollectionUtils.isEmpty(clusters)) {
             clusters = new ArrayList<>();
             clusters.addAll(clusterMap.keySet());
@@ -338,54 +304,39 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         return allIPs(clusters);
     }
 
-    public static VirtualClusterDomain fromJSON(String json) {
-        try {
-            VirtualClusterDomain vDom = JSON.parseObject(json, VirtualClusterDomain.class);
-            for (Cluster cluster : vDom.clusterMap.values()) {
-                cluster.setDom(vDom);
-            }
-
-            return vDom;
-        } catch (Exception e) {
-            Loggers.SRV_LOG.error("[NACOS-DOM] parse cluster json content: {}, error: {}", json, e);
-            return null;
-        }
-    }
-
-    @Override
     public String toJSON() {
         return JSON.toJSONString(this);
     }
 
     @JSONField(serialize = false)
-    public String getDomString() {
-        Map<Object, Object> domain = new HashMap<Object, Object>(10);
-        VirtualClusterDomain vDom = this;
+    public String getServiceString() {
+        Map<Object, Object> serviceObject = new HashMap<Object, Object>(10);
+        Service service = this;
 
-        domain.put("name", vDom.getName());
+        serviceObject.put("name", service.getName());
 
-        List<IpAddress> ips = vDom.allIPs();
+        List<Instance> ips = service.allIPs();
         int invalidIPCount = 0;
         int ipCount = 0;
-        for (IpAddress ip : ips) {
-            if (!ip.isValid()) {
+        for (Instance ip : ips) {
+            if (!ip.isHealthy()) {
                 invalidIPCount++;
             }
 
             ipCount++;
         }
 
-        domain.put("ipCount", ipCount);
-        domain.put("invalidIPCount", invalidIPCount);
+        serviceObject.put("ipCount", ipCount);
+        serviceObject.put("invalidIPCount", invalidIPCount);
 
-        domain.put("owners", vDom.getOwners());
-        domain.put("token", vDom.getToken());
+        serviceObject.put("owners", service.getOwners());
+        serviceObject.put("token", service.getToken());
 
-        domain.put("protectThreshold", vDom.getProtectThreshold());
+        serviceObject.put("protectThreshold", service.getProtectThreshold());
 
         List<Object> clustersList = new ArrayList<Object>();
 
-        for (Map.Entry<String, Cluster> entry : vDom.getClusterMap().entrySet()) {
+        for (Map.Entry<String, Cluster> entry : service.getClusterMap().entrySet()) {
             Cluster cluster = entry.getValue();
 
             Map<Object, Object> clusters = new HashMap<Object, Object>(10);
@@ -399,49 +350,23 @@ public class VirtualClusterDomain implements Domain, RaftListener {
             clustersList.add(clusters);
         }
 
-        domain.put("clusters", clustersList);
+        serviceObject.put("clusters", clustersList);
 
-        return JSON.toJSONString(domain);
+        return JSON.toJSONString(serviceObject);
     }
 
-    @Override
-    public String getName() {
-        return name;
-    }
-
-    @Override
-    public void setName(String name) {
-        if (!name.matches(DOMAIN_NAME_SYNTAX)) {
-            throw new IllegalArgumentException("dom name can only have these characters: 0-9a-zA-Z.:_-; current: " + name);
-        }
-
-        this.name = name;
-    }
-
-    public boolean isUseSpecifiedURL() {
-        return useSpecifiedURL;
-    }
-
-    public void setUseSpecifiedURL(boolean isUseSpecifiedURL) {
-        this.useSpecifiedURL = isUseSpecifiedURL;
-    }
-
-    @Override
     public String getToken() {
         return token;
     }
 
-    @Override
     public void setToken(String token) {
         this.token = token;
     }
 
-    @Override
     public List<String> getOwners() {
         return owners;
     }
 
-    @Override
     public void setOwners(List<String> owners) {
         this.owners = owners;
     }
@@ -462,63 +387,42 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         this.namespaceId = namespaceId;
     }
 
-    @Override
-    public void update(Domain dom) {
-        if (!(dom instanceof VirtualClusterDomain)) {
-            return;
-        }
+    public void update(Service vDom) {
 
-        VirtualClusterDomain vDom = (VirtualClusterDomain) dom;
         if (!StringUtils.equals(token, vDom.getToken())) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, token: {} -> {}", name, token, vDom.getToken());
+            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, token: {} -> {}", getName(), token, vDom.getToken());
             token = vDom.getToken();
         }
 
         if (!ListUtils.isEqualList(owners, vDom.getOwners())) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, owners: {} -> {}", name, owners, vDom.getOwners());
+            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, owners: {} -> {}", getName(), owners, vDom.getOwners());
             owners = vDom.getOwners();
         }
 
-        if (protectThreshold != vDom.getProtectThreshold()) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, protectThreshold: {} -> {}", name, protectThreshold, vDom.getProtectThreshold());
-            protectThreshold = vDom.getProtectThreshold();
-        }
-
-        if (useSpecifiedURL != vDom.isUseSpecifiedURL()) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, useSpecifiedURL: {} -> {}", name, useSpecifiedURL, vDom.isUseSpecifiedURL());
-            useSpecifiedURL = vDom.isUseSpecifiedURL();
+        if (getProtectThreshold() != vDom.getProtectThreshold()) {
+            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, protectThreshold: {} -> {}", getName(), getProtectThreshold(), vDom.getProtectThreshold());
+            setProtectThreshold(vDom.getProtectThreshold());
         }
 
         if (resetWeight != vDom.getResetWeight().booleanValue()) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, resetWeight: {} -> {}", name, resetWeight, vDom.getResetWeight());
+            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, resetWeight: {} -> {}", getName(), resetWeight, vDom.getResetWeight());
             resetWeight = vDom.getResetWeight();
         }
 
-        if (enableHealthCheck != vDom.getEnableHealthCheck().booleanValue()) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, enableHealthCheck: {} -> {}", name, enableHealthCheck, vDom.getEnableHealthCheck());
-            enableHealthCheck = vDom.getEnableHealthCheck();
-        }
-
-        if (enableClientBeat != vDom.getEnableClientBeat().booleanValue()) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, enableClientBeat: {} -> {}", name, enableClientBeat, vDom.getEnableClientBeat());
-            enableClientBeat = vDom.getEnableClientBeat();
-        }
-
         if (enabled != vDom.getEnabled().booleanValue()) {
-            Loggers.SRV_LOG.info("[DOM-UPDATE] dom: {}, enabled: {} -> {}", name, enabled, vDom.getEnabled());
+            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, enabled: {} -> {}", getName(), enabled, vDom.getEnabled());
             enabled = vDom.getEnabled();
         }
 
         selector = vDom.getSelector();
 
-        metadata = vDom.getMetadata();
+        setMetadata(vDom.getMetadata());
 
         updateOrAddCluster(vDom.getClusterMap().values());
         remvDeadClusters(this, vDom);
         recalculateChecksum();
     }
 
-    @Override
     public String getChecksum() {
         if (StringUtils.isEmpty(checksum)) {
             recalculateChecksum();
@@ -528,20 +432,22 @@ public class VirtualClusterDomain implements Domain, RaftListener {
     }
 
     public synchronized void recalculateChecksum() {
-        List<IpAddress> ips = allIPs();
+        List<Instance> ips = allIPs();
 
         StringBuilder ipsString = new StringBuilder();
-        ipsString.append(getDomString());
+        ipsString.append(getServiceString());
 
-        Loggers.SRV_LOG.debug("dom to json: " + getDomString());
+        if (Loggers.SRV_LOG.isDebugEnabled()) {
+            Loggers.SRV_LOG.debug("service to json: " + getServiceString());
+        }
 
-        if (!CollectionUtils.isEmpty(ips)) {
+        if (CollectionUtils.isNotEmpty(ips)) {
             Collections.sort(ips);
         }
 
-        for (IpAddress ip : ips) {
+        for (Instance ip : ips) {
             String string = ip.getIp() + ":" + ip.getPort() + "_" + ip.getWeight() + "_"
-                    + ip.isValid() + "_" + ip.getClusterName();
+                + ip.isHealthy() + "_" + ip.getClusterName();
             ipsString.append(string);
             ipsString.append(",");
         }
@@ -567,15 +473,17 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         for (Cluster cluster : clusters) {
             Cluster oldCluster = clusterMap.get(cluster.getName());
             if (oldCluster != null) {
+                oldCluster.setService(this);
                 oldCluster.update(cluster);
             } else {
                 cluster.init();
+                cluster.setService(this);
                 clusterMap.put(cluster.getName(), cluster);
             }
         }
     }
 
-    private void remvDeadClusters(VirtualClusterDomain oldDom, VirtualClusterDomain newDom) {
+    private void remvDeadClusters(Service oldDom, Service newDom) {
         Collection<Cluster> oldClusters = oldDom.getClusterMap().values();
         Collection<Cluster> newClusters = newDom.getClusterMap().values();
         List<Cluster> deadClusters = (List<Cluster>) CollectionUtils.subtract(oldClusters, newClusters);
@@ -586,26 +494,16 @@ public class VirtualClusterDomain implements Domain, RaftListener {
         }
     }
 
-    @Override
-    public float getProtectThreshold() {
-        return protectThreshold;
-    }
-
-    @Override
-    public void setProtectThreshold(float protectThreshold) {
-        this.protectThreshold = protectThreshold;
-    }
-
     public void addCluster(Cluster cluster) {
         clusterMap.put(cluster.getName(), cluster);
     }
 
-    public void valid() {
-        if (!name.matches(DOMAIN_NAME_SYNTAX)) {
-            throw new IllegalArgumentException("dom name can only have these characters: 0-9a-zA-Z-._:, current: " + name);
+    public void validate() {
+        if (!getName().matches(SERVICE_NAME_SYNTAX)) {
+            throw new IllegalArgumentException("dom name can only have these characters: 0-9a-zA-Z-._:, current: " + getName());
         }
         for (Cluster cluster : clusterMap.values()) {
-            cluster.valid();
+            cluster.validate();
         }
     }
 }

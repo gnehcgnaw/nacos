@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.nacos.naming.raft;
+package com.alibaba.nacos.naming.consistency.persistent.raft;
 
+import com.alibaba.nacos.naming.misc.GlobalExecutor;
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -34,7 +35,7 @@ public class RaftPeer {
 
     public volatile long leaderDueMs = RandomUtils.nextLong(0, GlobalExecutor.LEADER_TIMEOUT_MS);
 
-    public volatile  long heartbeatDueMs = RandomUtils.nextLong(0, GlobalExecutor.HEARTBEAT_INTERVAL_MS);
+    public volatile long heartbeatDueMs = RandomUtils.nextLong(0, GlobalExecutor.HEARTBEAT_INTERVAL_MS);
 
     public State state = State.FOLLOWER;
 

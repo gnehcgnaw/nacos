@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.nacos.naming.view;
+package com.alibaba.nacos.naming.pojo;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.nacos.api.naming.pojo.Cluster;
@@ -22,7 +22,7 @@ import com.alibaba.nacos.api.naming.pojo.Service;
 import java.util.List;
 
 /**
- * @author <a href="mailto:zpf.073@gmail.com">nkorange</a>
+ * @author nkorange
  */
 public class ServiceDetailView {
 

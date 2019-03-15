@@ -13,16 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.nacos.naming.view;
+package com.alibaba.nacos.naming.pojo;
 
 import com.alibaba.fastjson.JSON;
 
 /**
- * @author <a href="mailto:zpf.073@gmail.com">nkorange</a>
+ * @author nkorange
  */
 public class ServiceView {
 
     private String name;
+    private String groupName;
     private int clusterCount;
     private int ipCount;
     private int healthyInstanceCount;
@@ -33,6 +34,14 @@ public class ServiceView {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getGroupName() {
+        return groupName;
+    }
+
+    public void setGroupName(String groupName) {
+        this.groupName = groupName;
     }
 
     public int getClusterCount() {

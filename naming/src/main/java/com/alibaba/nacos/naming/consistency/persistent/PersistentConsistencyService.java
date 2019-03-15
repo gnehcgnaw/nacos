@@ -13,24 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.nacos.naming.healthcheck;
+package com.alibaba.nacos.naming.consistency.persistent;
+
+import com.alibaba.nacos.naming.consistency.ConsistencyService;
 
 /**
- * Health check mode
+ * A consistency service that guarantee CP consistency for the published data.
+ * <p>
+ * CP consistency is hereby defined as follows:
+ * <p>
+ * Once the writing operation returned client a success, the data within the operation is guaranteed to be
+ * successfully written to the cluster. And the data should be consistent between servers after some time
+ * without any outside interfere.
  *
- * @author <a href="mailto:zpf.073@gmail.com">nkorange</a>
+ * @author nkorange
+ * @since 1.0.0
  */
-public enum HealthCheckMode {
-    /**
-     * Health check sent from server.
-     */
-    server,
-    /**
-     * Health check sent from client.
-     */
-    client,
-    /**
-     * Health check disabled.
-     */
-    none
+public interface PersistentConsistencyService extends ConsistencyService {
 }

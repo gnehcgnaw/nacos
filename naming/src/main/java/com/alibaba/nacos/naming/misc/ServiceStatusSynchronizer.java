@@ -27,7 +27,7 @@ import java.util.Map;
 /**
  * @author nacos
  */
-public class DomainStatusSynchronizer implements Synchronizer {
+public class ServiceStatusSynchronizer implements Synchronizer {
     @Override
     public void send(final String serverIP, Message msg) {
         if(serverIP == null) {
@@ -36,16 +36,16 @@ public class DomainStatusSynchronizer implements Synchronizer {
 
         Map<String,String> params = new HashMap<String, String>(10);
 
-        params.put("domsStatus", msg.getData());
+        params.put("statuses", msg.getData());
         params.put("clientIP", NetUtils.localServer());
 
 
         String url = "http://" + serverIP + ":" + RunningConfig.getServerPort() + RunningConfig.getContextPath() +
-                UtilsAndCommons.NACOS_NAMING_CONTEXT + "/api/domStatus";
+                UtilsAndCommons.NACOS_NAMING_CONTEXT + "/service/status";
 
-        if (serverIP.contains(UtilsAndCommons.CLUSTER_CONF_IP_SPLITER)) {
+        if (serverIP.contains(UtilsAndCommons.IP_PORT_SPLITER)) {
             url = "http://" + serverIP + RunningConfig.getContextPath() +
-                    UtilsAndCommons.NACOS_NAMING_CONTEXT + "/api/domStatus";
+                    UtilsAndCommons.NACOS_NAMING_CONTEXT + "/service/status";
         }
 
         try {
@@ -53,7 +53,7 @@ public class DomainStatusSynchronizer implements Synchronizer {
                 @Override
                 public Integer onCompleted(Response response) throws Exception {
                     if (response.getStatusCode() != HttpURLConnection.HTTP_OK) {
-                        Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request domStatus, remote server: {}", serverIP);
+                        Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request serviceStatus, remote server: {}", serverIP);
 
                         return 1;
                     }
@@ -61,7 +61,7 @@ public class DomainStatusSynchronizer implements Synchronizer {
                 }
             });
         } catch (Exception e) {
-            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request domStatus, remote server: " + serverIP, e);
+            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request serviceStatus, remote server: " + serverIP, e);
         }
 
     }
@@ -74,14 +74,15 @@ public class DomainStatusSynchronizer implements Synchronizer {
 
         Map<String,String> params = new HashMap<>(10);
 
-        params.put("dom", key);
+        params.put("key", key);
 
         String result;
         try {
-            Loggers.SRV_LOG.info("[STATUS-SYNCHRONIZE] sync dom status from: {}, dom: {}", serverIP, key);
-            result = NamingProxy.reqAPI("ip4Dom2", params, serverIP, false);
+            Loggers.SRV_LOG.info("[STATUS-SYNCHRONIZE] sync service status from: {}, service: {}", serverIP, key);
+            result = NamingProxy.reqAPI(RunningConfig.getContextPath()
+                + UtilsAndCommons.NACOS_NAMING_CONTEXT + "/instance/" + "statuses", params, serverIP);
         } catch (Exception e) {
-            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] Failed to get domain status from " + serverIP, e);
+            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] Failed to get service status from " + serverIP, e);
             return null;
         }
 

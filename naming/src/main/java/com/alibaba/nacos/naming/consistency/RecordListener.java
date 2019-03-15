@@ -13,12 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.nacos.naming.raft;
+package com.alibaba.nacos.naming.consistency;
+
+import com.alibaba.nacos.naming.pojo.Record;
 
 /**
+ * Data listener public interface
+ *
  * @author nacos
  */
-public interface RaftListener {
+public interface RecordListener<T extends Record> {
 
     /**
      * Determine if the listener was registered with this key
@@ -43,14 +47,13 @@ public interface RaftListener {
      * @param value data of the key
      * @throws Exception
      */
-    void onChange(String key, String value) throws Exception;
+    void onChange(String key, T value) throws Exception;
 
     /**
      * Action to do if data of target key has been removed
      *
-     * @param key   target key
-     * @param value data of the key
+     * @param key target key
      * @throws Exception
      */
-    void onDelete(String key, String value) throws Exception;
+    void onDelete(String key) throws Exception;
 }
