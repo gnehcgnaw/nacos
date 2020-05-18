@@ -257,6 +257,8 @@ public class HostReactor {
         return serviceInfoMap.get(serviceObj.getKey());
     }
 
+
+
     public void scheduleUpdateIfAbsent(String serviceName, String clusters) {
         if (futureMap.get(ServiceInfo.getKey(serviceName, clusters)) != null) {
             return;
@@ -312,12 +314,14 @@ public class HostReactor {
 
         @Override
         public void run() {
+            long delayTime = -1;
+
             try {
                 ServiceInfo serviceObj = serviceInfoMap.get(ServiceInfo.getKey(serviceName, clusters));
 
                 if (serviceObj == null) {
                     updateServiceNow(serviceName, clusters);
-                    executor.schedule(this, DEFAULT_DELAY, TimeUnit.MILLISECONDS);
+                    delayTime = DEFAULT_DELAY;
                     return;
                 }
 
@@ -330,11 +334,24 @@ public class HostReactor {
                     refreshOnly(serviceName, clusters);
                 }
 
-                executor.schedule(this, serviceObj.getCacheMillis(), TimeUnit.MILLISECONDS);
-
                 lastRefTime = serviceObj.getLastRefTime();
+
+                if (!eventDispatcher.isSubscribed(serviceName, clusters) &&
+                    !futureMap.containsKey(ServiceInfo.getKey(serviceName, clusters))) {
+                    // abort the update task:
+                    NAMING_LOGGER.info("update task is stopped, service:" + serviceName + ", clusters:" + clusters);
+                    return;
+                }
+
+                delayTime = serviceObj.getCacheMillis();
+
+
             } catch (Throwable e) {
                 NAMING_LOGGER.warn("[NA] failed to update serviceName: " + serviceName, e);
+            } finally {
+                if (delayTime > 0) {
+                    executor.schedule(this, delayTime, TimeUnit.MILLISECONDS);
+                }
             }
 
         }

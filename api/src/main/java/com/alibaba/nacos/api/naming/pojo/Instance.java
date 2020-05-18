@@ -149,6 +149,9 @@ public class Instance {
     }
 
     public void addMetadata(String key, String value) {
+        if (this.metadata == null) {
+            this.metadata = new HashMap<String, String>(4);
+        }
         this.metadata.put(key, value);
     }
 
@@ -184,8 +187,7 @@ public class Instance {
         }
 
         Instance host = (Instance) obj;
-
-        return strEquals(toString(), host.toString());
+        return strEquals(host.toString(), toString());
     }
 
     @Override
@@ -219,7 +221,7 @@ public class Instance {
         }
         String value = getMetadata().get(key);
         if (!StringUtils.isEmpty(value) && value.matches(NUMBER_PATTERN)) {
-            return Long.valueOf(value);
+            return Long.parseLong(value);
         }
         return defaultValue;
     }

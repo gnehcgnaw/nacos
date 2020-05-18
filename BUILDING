@@ -35,7 +35,11 @@ Build Instructions for NACOS
     Execute the following command in order to build the tar.gz packages and install JAR into local repository:
 
 	#build nacos
+<<<<<<< HEAD
     $ mvn -Prelease-nacos -DskipTests clean install -U
         P meaning Profiles
         D meaning Properties
         U meaning update
+=======
+    $ mvn -Prelease-nacos -Dmaven.test.skip=true clean install -U
+>>>>>>> 2cf0d40c1ad95c5094c9c5bab85aa4a8f80a599e

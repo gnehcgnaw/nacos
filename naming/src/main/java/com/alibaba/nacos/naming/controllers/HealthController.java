@@ -19,8 +19,10 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.nacos.api.common.Constants;
 import com.alibaba.nacos.api.naming.CommonParams;
 import com.alibaba.nacos.api.naming.pojo.AbstractHealthChecker;
+import com.alibaba.nacos.core.auth.ActionTypes;
+import com.alibaba.nacos.core.auth.Secured;
+import com.alibaba.nacos.core.utils.ApplicationUtils;
 import com.alibaba.nacos.core.utils.WebUtils;
-import com.alibaba.nacos.naming.boot.RunningConfig;
 import com.alibaba.nacos.naming.core.Instance;
 import com.alibaba.nacos.naming.core.Service;
 import com.alibaba.nacos.naming.core.ServiceManager;
@@ -34,7 +36,10 @@ import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
 import java.util.HashMap;
@@ -63,12 +68,13 @@ public class HealthController {
     public JSONObject server() {
         JSONObject result = new JSONObject();
         result.put("msg", "Hello! I am Nacos-Naming and healthy! total services: raft " + serviceManager.getServiceCount()
-            + ", local port:" + RunningConfig.getServerPort());
+            + ", local port:" + ApplicationUtils.getPort());
         return result;
     }
 
     @CanDistro
     @PutMapping(value = {"", "/instance"})
+    @Secured(action = ActionTypes.WRITE)
     public String update(HttpServletRequest request) {
 
         String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID,

@@ -15,8 +15,9 @@
  */
 package com.alibaba.nacos.config.server.service;
 
+import com.alibaba.nacos.common.utils.IoUtils;
 import com.alibaba.nacos.config.server.utils.RegexParser;
-import org.apache.commons.io.IOUtils;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -44,7 +45,7 @@ public class AggrWhitelist {
      */
      public static boolean isAggrDataId(String dataId) {
         if (null == dataId) {
-            throw new IllegalArgumentException();
+            throw new IllegalArgumentException("dataId is null");
         }
 
         for (Pattern pattern : AGGR_DATAID_WHITELIST.get()) {
@@ -66,7 +67,7 @@ public class AggrWhitelist {
         defaultLog.warn("[aggr-dataIds] {}", content);
 
         try {
-            List<String> lines = IOUtils.readLines(new StringReader(content));
+            List<String> lines = IoUtils.readLines(new StringReader(content));
             compile(lines);
         } catch (Exception ioe) {
             defaultLog.error("failed to load aggr whitelist, " + ioe.toString(), ioe);
